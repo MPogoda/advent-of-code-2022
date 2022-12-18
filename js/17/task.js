@@ -80,13 +80,6 @@ function moveUntilSettled(i, grid, piece) {
   return moveUntilSettled((i + 1) % rawData.length, grid, movedV);
 }
 
-function show(grid) {
-  for (const x of grid) {
-    console.debug(("0000000" + x.toString(2)).slice(-W).replace(/0/g, " "));
-  }
-  console.debug();
-}
-
 console.time("Part 1");
 (() => {
   const grid = [];
@@ -118,7 +111,7 @@ console.time("Part 2");
   function getKey(t) {
     return [t % 5, i]
       .concat(
-        Array(30)
+        Array(30) // 23 is enough
           .fill(0)
           .map((_, y) => grid[top - y] ?? 0)
       )
