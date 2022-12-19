@@ -10,131 +10,116 @@ const blueprints = rawData.map((line) => {
       .exec(line)
       .slice(1)
       .map(Number);
-  return {
-    ore: { ore: a },
-    clay: { ore: b },
-    obsidian: { ore: c, clay: d },
-    geode: { ore: e, obsidian: f },
-  };
+  return [
+    [a, 0, 0, 0],
+    [b, 0, 0, 0],
+    [c, d, 0, 0],
+    [e, 0, f, 0],
+
+    [Math.max(b, c, e), d, Infinity, Infinity],
+  ];
 });
 console.timeEnd("parser");
 
-function hasSeen(seenStorage, state) {
-  const [t, ore, clay, obsidian, geode, rOre, rClay, rObsidian, rGeode] = state;
-  const hashM =
-    1_000_000_000 * geode + 1_000_000 * obsidian + 1_000 * clay + ore;
-  const hashR = 32 ** 3 * rGeode + 32 ** 2 * rObsidian + 32 * rClay + rOre;
-  const key = [t, hashM, hashR].join(":");
-  if (seenStorage.has(key)) {
-    return true;
+const EXTRACT = Array(4)
+  .fill(0)
+  .map((_, x) => 8 * x)
+  .map((x) => (raw) => (raw >> x) & 0xff);
+const CONST = Array(4)
+  .fill(0)
+  .map((_, x) => 1 << (8 * x));
+
+const [ore, clay, obsidian, geode] = EXTRACT;
+const [ORE, CLAY, OBSIDIAN, GEODE] = CONST;
+
+function calculateTimeNeeded(req, res, robots, extract) {
+  return req && req > extract(res)
+    ? Math.floor((req - extract(res) + extract(robots) - 1) / extract(robots))
+    : 0;
+}
+function go(blueprint, t, res = 0, robots = ORE) {
+  let max = geode(res + t * robots);
+
+  if (ore(robots) < blueprint[4][0]) {
+    const ff = 1 + calculateTimeNeeded(blueprint[0][0], res, robots, ore);
+    if (t > ff) {
+      max = Math.max(
+        max,
+        go(
+          blueprint,
+          t - ff,
+          res + ff * robots - ORE * blueprint[0][0],
+          robots + ORE
+        )
+      );
+    }
   }
-  seenStorage.add(key);
-  return false;
+
+  if (clay(robots) < blueprint[4][1]) {
+    const ff = 1 + calculateTimeNeeded(blueprint[1][0], res, robots, ore);
+    if (t > ff) {
+      max = Math.max(
+        max,
+        go(
+          blueprint,
+          t - ff,
+          res + ff * robots - ORE * blueprint[1][0],
+          robots + CLAY
+        )
+      );
+    }
+  }
+
+  if (clay(robots)) {
+    const ff =
+      1 +
+      Math.max(
+        calculateTimeNeeded(blueprint[2][0], res, robots, ore),
+        calculateTimeNeeded(blueprint[2][1], res, robots, clay)
+      );
+    if (t > ff) {
+      max = Math.max(
+        max,
+        go(
+          blueprint,
+          t - ff,
+          res + ff * robots - ORE * blueprint[2][0] - CLAY * blueprint[2][1],
+          robots + OBSIDIAN
+        )
+      );
+    }
+  }
+
+  if (obsidian(robots)) {
+    const ff =
+      1 +
+      Math.max(
+        calculateTimeNeeded(blueprint[3][0], res, robots, ore),
+        calculateTimeNeeded(blueprint[3][2], res, robots, obsidian)
+      );
+    if (t > ff) {
+      max = Math.max(
+        max,
+        go(
+          blueprint,
+          t - ff,
+          res +
+            ff * robots -
+            ORE * blueprint[3][0] -
+            OBSIDIAN * blueprint[3][2],
+          robots + GEODE
+        )
+      );
+    }
+  }
+
+  return max;
 }
 
-function simplifyState(blueprint, state) {
-  const maxOreNeeds = Math.max(
-    blueprint.ore.ore,
-    blueprint.clay.ore,
-    blueprint.obsidian.ore,
-    blueprint.geode.ore
-  );
-  let [t, ore, clay, obsidian, geode, rOre, rClay, rObsidian, rGeode] = state;
-  rOre = Math.min(rOre, maxOreNeeds);
-  rObsidian = Math.min(rObsidian, blueprint.geode.obsidian);
-  rClay = Math.min(rClay, blueprint.obsidian.clay);
-  ore = Math.min(ore, t * maxOreNeeds - rOre * (t - 1));
-  clay = Math.min(clay, t * blueprint.obsidian.clay - rClay * (t - 1));
-  obsidian = Math.min(
-    obsidian,
-    t * blueprint.geode.obsidian - rObsidian * (t - 1)
-  );
-  return [t, ore, clay, obsidian, geode, rOre, rClay, rObsidian, rGeode];
-}
-
-function* nextStates(blueprint, seen, state) {
-  const [t, ore, clay, obsidian, geode, rOre, rClay, rObsidian, rGeode] =
-    simplifyState(blueprint, state);
-  if (!t || hasSeen(seen, state)) {
-    return;
-  }
-  yield [
-    t - 1,
-    ore + rOre,
-    clay + rClay,
-    obsidian + rObsidian,
-    geode + rGeode,
-    rOre,
-    rClay,
-    rObsidian,
-    rGeode,
-  ];
-
-  if (ore >= blueprint.ore.ore) {
-    yield [
-      t - 1,
-      ore + rOre - blueprint.ore.ore,
-      clay + rClay,
-      obsidian + rObsidian,
-      geode + rGeode,
-      rOre + 1,
-      rClay,
-      rObsidian,
-      rGeode,
-    ];
-  }
-  if (ore >= blueprint.clay.ore) {
-    yield [
-      t - 1,
-      ore + rOre - blueprint.clay.ore,
-      clay + rClay,
-      obsidian + rObsidian,
-      geode + rGeode,
-      rOre,
-      rClay + 1,
-      rObsidian,
-      rGeode,
-    ];
-  }
-  if (ore >= blueprint.obsidian.ore && clay >= blueprint.obsidian.clay) {
-    yield [
-      t - 1,
-      ore + rOre - blueprint.obsidian.ore,
-      clay + rClay - blueprint.obsidian.clay,
-      obsidian + rObsidian,
-      geode + rGeode,
-      rOre,
-      rClay,
-      rObsidian + 1,
-      rGeode,
-    ];
-  }
-
-  if (ore >= blueprint.geode.ore && obsidian >= blueprint.geode.obsidian) {
-    yield [
-      t - 1,
-      ore + rOre - blueprint.geode.ore,
-      clay + rClay,
-      obsidian + rObsidian - blueprint.geode.obsidian,
-      geode + rGeode,
-      rOre,
-      rClay,
-      rObsidian,
-      rGeode + 1,
-    ];
-  }
-}
 console.time("Part 1");
 (() => {
   const qualityLevels = blueprints.map((blueprint, index) => {
-    let max = 0;
-    const queue = [[24, 0, 0, 0, 0, 1, 0, 0, 0]];
-    const seen = new Set();
-    while (queue.length) {
-      const current = queue.pop();
-      max = Math.max(current[4], max);
-      queue.push(...nextStates(blueprint, seen, current));
-    }
+    const max = go(blueprint, 24);
     return (index + 1) * max;
   });
 
@@ -146,17 +131,7 @@ console.time("Part 2");
 (() => {
   const ans = blueprints
     .slice(0, 3)
-    .map((blueprint) => {
-      let max = 0;
-      const queue = [[32, 0, 0, 0, 0, 1, 0, 0, 0]];
-      const seen = new Set();
-      while (queue.length) {
-        const current = queue.pop();
-        max = Math.max(current[4], max);
-        queue.push(...nextStates(blueprint, seen, current));
-      }
-      return max;
-    })
+    .map((blueprint) => go(blueprint, 32))
     .reduce((acc, v) => acc * v, 1);
   console.info(ans);
 })();
